@@ -1,0 +1,198 @@
+<?php
+/**
+ * @file
+ * Database table creation for biblio_pubmed_alternative module.
+ */
+
+/**
+ * Implementation of hook_install().
+ */
+
+function biblio_pubmed_alternative_install() {
+
+  $result[] = _biblio_pubmed_alternative_types_customize_fields();
+
+}
+
+function biblio_pubmed_alternative_uninstall() {
+  variable_del('biblio_pubmed_alternative_dup_action');
+  variable_del('biblio_pubmed_alternative_auto_update');
+  variable_del('biblio_pubmed_alternative_update_interval');
+  variable_del('biblio_pubmed_alternative_update_limit');
+  variable_del('biblio_pubmed_alternative_age_limit');
+  variable_del('biblio_pubmed_alternative_update_next_execution');
+  db_drop_table('biblio_pubmed');
+  $result[] = _biblio_pubmed_alternative_remove_customized_fields();
+
+}
+
+function biblio_pubmed_alternative_enable() {
+  $result[] = _biblio_pubmed_alternative_types_customize_fields();
+  biblio_pubmed_alternative_set_system_weight();
+}
+
+function biblio_pubmed_alternative_set_system_weight() {
+  db_update('system')
+    ->fields(array('weight' => 19))
+    ->condition('name', 'biblio_pubmed_alternative')
+    ->execute();
+}
+
+/**
+ * Implementation of hook_schema().
+ *
+ * Note:  Pro Drupal Development models use of t() to translate 'description'
+ * for field definitions, but Drupal core does not use them.  We follow core.
+ */
+function biblio_pubmed_alternative_schema() {
+  $schema = array();
+  $schema['biblio_pubmed_alt'] = array(
+    'fields' => array(
+      'biblio_pubmed_id' => array(
+        'type'     => 'int',
+        'not null' => TRUE
+      ),
+      'biblio_pmcid' => array(
+        'type'     => 'char',
+        'length' => 20,
+      ),
+        'nid' => array(
+        'type' => 'int',
+        'not null' => TRUE
+      ),
+      'biblio_pubmed_md5' => array(
+        'type' => 'char',
+        'length' => 32,
+        'not null' => TRUE
+      ),
+      'biblio_pmid_changed' => array(
+        'description' => 'The Unix timestamp when the pmid was most recently saved.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0
+      ),
+    ),
+    'primary key' => array('nid'),
+  );
+  return $schema;
+}
+
+/**
+*
+* Removes biblio_pubmed_id and biblio_pmcid columns into main biblio tables
+* Drops biblio_pubmed table
+*
+*/
+function _biblio_pubmed_alternative_remove_customized_fields() {
+   $fields = array("biblio_pubmed_id","biblio_pmcid");
+   foreach ($fields as &$field) {
+
+      if ($field == "biblio_pubmed_id") {
+         $name = "PubMed ID";
+      } else if ($field == "biblio_pmcid") {
+         $name = "PubMed Central ID";
+      }
+      $db_result = db_query("DELETE from {biblio_field_type_data} WHERE title = :name",array(':name' => $name));
+     
+      // reset ftdid variable, only has effect if the pubmed variables are the hightest
+      $sql = 'SELECT ftdid FROM {biblio_field_type_data} ORDER BY ftdid DESC LIMIT 1';
+      $db_result = db_query($sql);
+      foreach ($db_result as $record) {
+         $lastftdid = $record -> ftdid;
+      }
+      variable_set('biblio_last_ftdid', $lastftdid); //reset ftdid variable
+
+      $db_result = db_query("SELECT fid from {biblio_fields} WHERE name = :name",array(':name' => $field));
+      foreach ($db_result as $record) {
+         $biblio_fid = $record->fid;
+      }
+      if (isset($biblio_fid)) {
+         $db_result = db_query("DELETE from {biblio_fields} WHERE name = :name",array(':name' => $field));
+         $db_result = db_query("DELETE from {biblio_field_type} WHERE fid = :fid",array(':fid' => $biblio_fid));
+      }
+   }
+}
+   
+/**
+*
+* Insert columns into main biblio tables, so that the new ids can get displayed 
+*
+*/
+function _biblio_pubmed_alternative_types_customize_fields() {
+
+  // biblio_field_type_data defines the entry
+
+   $fields = array("biblio_pubmed_id","biblio_pmcid");
+
+   foreach ($fields as &$field) {
+      unset($biblio_fid,$biblio_tid,$biblio_ftdid);
+      if ($field == "biblio_pubmed_id") {
+         $name = "PubMed ID";
+      } else if ($field == "biblio_pmcid") {
+         $name = "PubMed Central ID";
+      }
+
+      $db_result = db_query("SELECT ftdid from {biblio_field_type_data} WHERE title = :name",array(':name' => $name));
+      foreach ($db_result as $record) {
+         $biblio_ftdid = $record->ftdid;
+      }
+      if (!isset($biblio_ftdid)) {
+         $biblio_ftdid = variable_get('biblio_last_ftdid', 100); 
+         $biblio_ftdid++;
+         db_query("INSERT INTO {biblio_field_type_data} (ftdid, title, hint) VALUES (:biblio_ftdid, :name, '')",
+                  array(':biblio_ftdid' => $biblio_ftdid, ':name' => $name ));
+         variable_set('biblio_last_ftdid', $biblio_ftdid); //increment the field type data id by one.
+      } 
+   
+     // biblio_fields defines the variable names and the data type
+   
+      $db_result = db_query("SELECT fid from {biblio_fields} WHERE name = :name",array(':name' => $field));
+      foreach ($db_result as $record) {
+         $biblio_fid = $record->fid;
+      }
+      if (!isset($biblio_fid)) {
+         $sql = 'SELECT fid FROM {biblio_fields} ORDER BY fid DESC LIMIT 1';
+         $db_result = db_query($sql);
+         foreach ($db_result as $record) {
+            $lastfid = $record -> fid;
+         }
+         $biblio_fid  = $lastfid + 1;
+         db_query("INSERT INTO {biblio_fields} (fid, name, type, size, maxsize) VALUES (:fid, :name, :type, :size, :maxsize)",
+                  array(':fid' => $biblio_fid, ':name' => $field, ':type' => "textfield", ':size' => 60, ':maxsize' => 255));
+      } 
+   
+     // biblio_field_type connects the two tables, and enables the viewing of the field for the different content types
+     // 102 is the content type (tid) for Journal Article, the most common for PMID and PMCID (http://www.ncbi.nlm.nih.gov/pmc/about/faq)
+
+     $biblio_tid = 102;
+     // first check whether the row already exists (primary key: tid, fid)
+      $db_result = db_query("SELECT tid from {biblio_field_type} WHERE tid = :tid and fid = :fid",array(':tid' => $biblio_tid, ':fid' => $biblio_fid));
+      foreach ($db_result as $record) {
+         $biblio_tid_exists = $record->tid;
+      }
+     // now insert - vtab 4 (Identifiers)
+      if (!isset($biblio_tid_exists)) {
+         db_query("INSERT INTO {biblio_field_type} (tid, fid, ftdid, cust_tdid, common, vtab, autocomplete,
+                   required, weight, visible) values (:biblio_tid, :biblio_fid, :biblio_ftdid, :biblio_ftdid, 1, 4, 0, 0, 160, 0)",
+                   array(':biblio_tid' => $biblio_tid, ':biblio_fid' => $biblio_fid, ':biblio_ftdid' => $biblio_ftdid));
+      }
+   }
+}
+
+/** 
+*
+* UPDATES
+*
+*/
+
+
+/**
+*
+* add updates to database tables here
+*
+*/
+
+function biblio_pubmed_alternative_update_7001() {
+
+}
+

@@ -1,0 +1,7 @@
+name = Biblio - PubMed Alternative
+description = Provides PubMed and PMCID import and display and editing functions in Biblio Module
+core = 7.x
+package[] = biblio
+dependencies[] = biblio
+files[] = EntrezClient.php
+files[] = EntrezPubmedArticle.php
